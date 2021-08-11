@@ -3,8 +3,6 @@
 [![CRAN_Status_Badge](http://www.r-pkg.org/badges/version/microDA)](https://cran.r-project.org/package=microDA)
 
 # R-metagenomics
-Pipeline for analysis of metagenomic sequences
-
 This pipeline contains a post-processing analysis in R markdown for metagenomic analysis.
 
 # Getting started
