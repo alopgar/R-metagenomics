@@ -1,0 +1,542 @@
+---
+title: "METALGEN_SQMr"
+author: "Adrian Lopez Garcia"
+date: '`r format(Sys.time(), "%d/%m/%Y")`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+dic.code <- "C:/Users/INIA/5_R_Scripts"
+
+setwd(dic.code)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+packs <- c("easyCODA", "ggordiplots", "grid", "gridExtra", "ggordiplots", "ggpubr", "kableExtra", "knitr", "limma",
+           "phyloseq", "plotly", "propr", "rmarkdown", "sunburstR", "tidyverse", "treemap", "vegan", "zCompositions")
+lapply(packs, require, character.only = TRUE)
+library(microDA)
+
+```
+
+```{r init_variables, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+## WORKING DIRECTORY
+WD <- "D:/Adrian/METALGEN/MinION/"
+RSAV <- paste0(WD, "Rsaves/Rdata/")
+PLOTSAV <- paste0(WD, "Rsaves/RPlots/")
+TBLSAV <- paste0(WD, "Rsaves/RTables/")
+
+## INPUT VARIABLES
+# metadataset: Logical control variable. If TRUE metadata will be required. If FALSE metadata can be NULL.
+# taxdenom: Names assigned for taxa ranges.
+# taxlvl: Level for classification limit (by default: 7 = species)
+metadataset <- TRUE
+taxdenom <- c("superkingdom", "phylum", "class", "order", "family", "genus", "species")
+taxlvl <- 6
+taxrng <- seq(taxlvl)
+
+## ANALYSIS PHENOT VARIABLES:
+phenots <- c("ch4.spkpm_adjusted", "NLACTA", "DIASLE", "CH4_Rank")
+
+## OUTLIERS:
+outliers <- c("SH_3", "AMET_016")
+
+## PLOTTING VARIABLES
+prevalence.tax <- "Phylum"
+
+## DA VARIABLES
+# Not limma:
+alpha = 0.05
+# Limma variables:
+fc.cut = 0.5
+qval = 0.05
+
+```
+
+```{r data, include=FALSE}
+load(paste0(RSAV, "00_METADATA.rda"))
+load(paste0(RSAV, "01_DATA_TAXA.rda"))
+load(paste0(RSAV, "02_DATA_KEGG.rda"))
+
+```
+
+```{r CODA_ZCompositions, include=FALSE}
+group_tax_all <- c("phylum", "class", "order", "family", "genus")
+load(paste0(RSAV, "21_CODATA_TAXA.rda"))
+load(paste0(RSAV, "22_CODATA_KEGG.rda"))
+
+```
+
+# FIGURES:
+```{r FIG.1}
+FIG1 <- new.env()
+load(file = paste0(RSAV, "11_GGPLOTS_TAXA.rda"), env = FIG1)
+load(file = paste0(RSAV, "12_GGPLOTS_KEGG.rda"), env = FIG1)
+
+tiff(paste0(PLOTSAV, "Fig1.tiff"), width = 5000, height = 2500, res = 300)
+grid.arrange(FIG1$ggcounts + ggtitle("A") + theme(legend.position='none', plot.title = element_text(size = 22)) , 
+             FIG1$ggcounts_k + ggtitle("B") + theme(plot.title = element_text(size = 22)), ncol=2, widths = c(1,1.25))
+dev.off()
+
+```
+
+```{r FIG.2}
+FIG2 <- new.env()
+load(file = paste0(RSAV, "11_GGPLOTS_TAXA.rda"), env = FIG2)
+
+# SAVE PLOTS:
+## Save as png:
+py <- plotly(username="adrianlopgar", key="1NfrEfjalp0Hp4DKCkOE")
+plotly_IMAGE(FIG2$ggpie %>% add_annotations(x=0, y=1, text="A", showarrow=F, font=list(size = 55)), 
+             width=660, height=775, format="png", scale=2, out_file=paste0(PLOTSAV, "GeneraProps_1.png"))
+plotly_IMAGE(FIG2$ggpie2 %>% add_annotations(x=0, y=1, text="B", showarrow=F, font=list(size = 55)),
+             width=660, height=775, format="png", scale=2, out_file=paste0(PLOTSAV, "GeneraProps_01.png"))
+
+## Load png and create grobs:
+FIG2$grob_ggpie <- rasterGrob(as.raster(png::readPNG(paste0(PLOTSAV, "GeneraProps_1.png"))),interpolate = F)
+FIG2$grob_ggpie2 <- rasterGrob(as.raster(png::readPNG(paste0(PLOTSAV, "GeneraProps_01.png"))),interpolate = F)
+
+## Create legends:
+windows(height = 1.5, width = 2.1, bg = "white")
+par(mar = rep(0,4))
+plot(0, type = 'n', axes = F, ann = F)
+legend("left", legend = names(FIG2$piecols), fill = FIG2$piecols, bty = "n", cex = 1)
+FIG2$leg1 <- recordPlot()
+dev.off()
+
+windows(height = 3, width = 3.5, bg = "white")
+par(mar = rep(0,4))
+plot(0, type = 'n', axes = F, ann = F)
+legend("left", legend = names(FIG2$piecols2), fill = FIG2$piecols2, bty = "n", cex = 1)
+FIG2$leg2 <- recordPlot()
+dev.off()
+
+## Arrange grobs (grob order is inverse to priorize plots over legend backgrounds) and save:
+FIG2$layout <- matrix(c(4,4,4,4,NA,3,NA,NA,2,2,2,2,NA,1,1,NA), nrow = 4, ncol = 4)
+ggsave(paste0(PLOTSAV, "Fig2.png"), device = "png", width = 26, height = 12, dpi = 300,
+       marrangeGrob(list(cowplot::as_grob(FIG2$leg2), FIG2$grob_ggpie2, cowplot::as_grob(FIG2$leg1), FIG2$grob_ggpie), 
+             nrow = 4, ncol = 4, layout_matrix = FIG2$layout, widths = c(10,2,10,3.5), heights = c(2,1,1,2), top = F))
+
+```
+
+```{r FIG.3}
+FIG3 <- new.env()
+load(file = paste0(RSAV, "11_GGPLOTS_TAXA.rda"), env = FIG3)
+
+ggsave(paste0(PLOTSAV, "Fig3.tiff"), FIG3$raplot, width = 18, height = 10, units = "in", dpi = 300)
+
+```
+
+```{r FIG.4}
+FIG4 <- new.env()
+load(file = paste0(RSAV, "12_GGPLOTS_KEGG.rda"), env = FIG4)
+
+# SAVE PLOT
+tiff(file=paste0(PLOTSAV,"Fig4.tiff"), width = 16, height = 9, res = 300, units = "in")
+grid::pushViewport(grid::viewport(layout=grid::grid.layout(1, 2)))
+vp <- grid::viewport(layout.pos.col=1, layout.pos.row=1)
+grid::pushViewport(vp)
+treemap(FIG4$piekg_path, index = c("Rank1","Rank2"), vSize = "AvgRA", type = "categorical", vColor = "Rank1",
+        algorithm = "pivotSize", title = "KEGG Pathway abundance treemap", inflate.labels = FALSE,
+        overlap.labels = 1, lowerbound.cex.labels = 0, bg.labels = "#CCCCCCAA", 
+        position.legend = "none", vp = vp)
+grid::popViewport()
+vp <- grid::viewport(layout.pos.col=2, layout.pos.row=1)
+grid::pushViewport(vp)
+treemap(FIG4$piekg_brite, index = c("Rank2","Rank3"), vSize = "AvgRA", type = "categorical", vColor = "Rank2",
+        algorithm = "pivotSize", title = "BRITE Hierarchies abundance treemap", inflate.labels = FALSE,
+        overlap.labels = 1, lowerbound.cex.labels = 0, bg.labels = "#CCCCCCAA", 
+        position.legend = "none", vp = vp)
+grid::popViewport()
+dev.off()
+
+```
+
+```{r FIG.5}
+FIG5 <- new.env()
+load(file = paste0(RSAV, "31_DIV_BETA_TAXA.rda"), env = FIG5)
+load(file = paste0(RSAV, "32_DIV_BETA_KEGG.rda"), env = FIG5)
+load(file = paste0(RSAV, "35_DIV_BETA_PCA_ORDISURF_TAXA.rda"), env = FIG5)
+load(file = paste0(RSAV, "36_DIV_BETA_PCA_ORDISURF_KEGG.rda"), env = FIG5)
+
+# SAVE PLOT. For tiff: legend y.intersp=1.3, cex=1.3; For clipboard: legend y.intersp=0.7, cex=1.2
+tiff(paste0(PLOTSAV, "Fig5.tiff"), width = 4500, height = 2500, res = 300)
+layout(matrix(c(1,2,3,7,4,5,6,0), ncol=4, nrow=2, byrow=T), widths = c(2,2,2,1))
+for(i in seq(FIG5$beta.pca)){
+  palette(c("limegreen", "palegreen", "tan1", "darkorange1"))
+  plot(FIG5$beta.pca[[i]]$x, display = 'sites', 
+       xlab = paste0("PC1 ", round(summary(FIG5$beta.pca[[i]])$importance["Proportion of Variance","PC1"]*100, 2), "%"), 
+       ylab = paste0("PC2 ", round(summary(FIG5$beta.pca[[i]])$importance["Proportion of Variance","PC2"]*100, 2), "%"), 
+       main = paste("PCA + ORDISURF (CH4) -", names(FIG5$beta.pca)[i], "level",
+                    "\nDev. explained =", round(summary(FIG5$ordisurf.lst[[i]]$GAM.res)$dev.expl*100, 2), "%",
+                    "; P-val =", round(summary(FIG5$ordisurf.lst[[i]]$GAM.res)$s.pv, 5)))
+  points(FIG5$beta.pca[[i]]$x, pch = 19, col = FIG5$betadat.lst[[i]]$CH4_Rank, cex = 1.5)
+  #plot(FIG5$ordisurf.lst[[i]]$LM.res, col = "red", lwd = 2, add = T)
+  plot(FIG5$ordisurf.lst[[i]]$GAM.res, col = "blue", lwd = 2, add = T)
+}
+plot(FIG5$beta.pca.k$x, display = 'sites', xlim=c(-50,50), 
+     xlab = paste0("PC1 ", round(summary(FIG5$beta.pca.k)$importance["Proportion of Variance","PC1"]*100, 2), "%"), 
+     ylab = paste0("PC2 ", round(summary(FIG5$beta.pca.k)$importance["Proportion of Variance","PC2"]*100, 2), "%"),
+     main=paste("PCA + ORDISURF (CH4) - KEGG",
+                "\nDev. explained =", round(summary(FIG5$ordisurf.k$GAM.res)$dev.expl*100, 2), "%",
+                "; P-val =", round(summary(FIG5$ordisurf.k$GAM.res)$s.pv, 5)))
+points(FIG5$beta.pca.k$x, pch = 19, col = FIG5$betadat_k$CH4_Rank, cex = 1.5)
+#plot(FIG5$ordisurf.k$LM.res, col = "red", lwd = 2, add = T)
+plot(FIG5$ordisurf.k$GAM.res, col = "blue", lwd = 2, add = T)
+plot.new()
+par(mar=c(1,1,1,1))
+legend("left", legend = levels(FIG5$betadat_k$CH4_Rank), x.intersp=0.5, y.intersp=1.3, fill=1:4, bty="n", cex=1.3)
+dev.off()
+
+```
+
+```{r FIG.6}
+FIG6 <- new.env()
+load(file = paste0(RSAV, "41_LIMMA_TAXA.rda"), env = FIG6)
+load(file = paste0(RSAV, "42_LIMMA_KEGG.rda"), env = FIG6)
+
+# CREATE VOLCANO PLOTS: We use coef = 1 because it is the most interesting contrast (LOW vs HIGH)
+## TAXA:
+FIG6$volctab.tax <- rownames_to_column(topTable(FIG6$fit.tax, coef = 1, p.value = 1, number = 'Inf'), "Feature")
+for(i in seq(nrow(FIG6$volctab.tax))){
+  if(FIG6$volctab.tax[i,"adj.P.Val"] <= qval && abs(FIG6$volctab.tax[i,"logFC"]) > fc.cut){
+    FIG6$volctab.tax[i,"siglegend"] <- "p-val & log FC"
+  } else if(FIG6$volctab.tax[i,"adj.P.Val"] <= qval && abs(FIG6$volctab.tax[i,"logFC"]) < fc.cut){
+    FIG6$volctab.tax[i,"siglegend"] <- "p-val"
+  } else if(FIG6$volctab.tax[i,"adj.P.Val"] > qval && abs(FIG6$volctab.tax[i,"logFC"]) > fc.cut){
+    FIG6$volctab.tax[i,"siglegend"] <- "log FC"
+  } else if(FIG6$volctab.tax[i,"adj.P.Val"] > qval && abs(FIG6$volctab.tax[i,"logFC"]) < fc.cut){
+    FIG6$volctab.tax[i,"siglegend"] <- "NS"
+  }
+}
+FIG6$volctab.tax$siglegend <- factor(FIG6$volctab.tax$siglegend, levels = c("NS", "log FC", "p-val", "p-val & log FC"))
+FIG6$volctab.tax <- merge(FIG6$volctab.tax, data.tx_tax[,c("genus","superkingdom")], by.x = "Feature", by.y = "genus", all = T)
+
+FIG6$vindex <- seq(sort(FIG6$volctab.tax[FIG6$volctab.tax$siglegend == "p-val & log FC","Feature"]))
+names(FIG6$vindex) <- sort(FIG6$volctab.tax[FIG6$volctab.tax$siglegend == "p-val & log FC","Feature"])
+FIG6$volctab.tax <- merge(FIG6$volctab.tax, FIG6$vindex, by.x = "Feature", by.y = 0, all = T)
+
+FIG6$vgrobtheme <- gridExtra::ttheme_minimal(core=list(fg_params=list(cex=0.7, hjust=0, x=0)))
+FIG6$volctab.leg.tbl <- tableGrob(FIG6$volctab.tax[FIG6$volctab.tax$siglegend == "p-val & log FC",c("y", "Feature")], 
+                                  rows = NULL, cols = NULL, theme = FIG6$vgrobtheme)
+
+FIG6$dsp.tax <- ggplot(FIG6$volctab.tax, aes(x = logFC, y = -log10(adj.P.Val), text = c(paste0("Feat.: ", Feature)))) + 
+  geom_hline(yintercept = -log10(qval), linetype = "dashed") +
+  geom_vline(xintercept = fc.cut, linetype = "dashed") +
+  geom_vline(xintercept = -fc.cut, linetype = "dashed") +
+  geom_point(aes(fill = siglegend), shape = 21, size = 3, alpha = 0.6) + 
+  scale_fill_manual(values = c("black", "darkgrey", "darkgreen", "darkred"), drop = F) +
+  ggrepel::geom_text_repel(mapping = aes(label = ifelse(siglegend == "p-val & log FC", y, ""), color = superkingdom), 
+                           point.padding = unit(0.2, "lines"), size = 4) +
+  #labs(title = "Volcano plot for DA taxa\nLOW vs HIGH methane emissions") +
+  labs(title = "A") +
+  theme_bw() +
+  theme(text = element_text(size = 14), plot.title = element_text(size = 16), axis.title = element_text(size = 12),
+        legend.title = element_blank(), legend.position="top", plot.margin = unit(c(2, 1, 0.5, 0.5), "lines"))
+
+## KEGGS:
+FIG6$volctab.kegg <- rownames_to_column(topTable(FIG6$fit.kegg, coef = 1, p.value = 1, number = 'Inf'), "Feature")
+for(i in seq(nrow(FIG6$volctab.kegg))){
+  if(FIG6$volctab.kegg[i,"adj.P.Val"] <= qval && abs(FIG6$volctab.kegg[i,"logFC"]) > fc.cut){
+    FIG6$volctab.kegg[i,"siglegend"] <- "p-val & log FC"
+  } else if(FIG6$volctab.kegg[i,"adj.P.Val"] <= qval && abs(FIG6$volctab.kegg[i,"logFC"]) < fc.cut){
+    FIG6$volctab.kegg[i,"siglegend"] <- "p-val"
+  } else if(FIG6$volctab.kegg[i,"adj.P.Val"] > qval && abs(FIG6$volctab.kegg[i,"logFC"]) > fc.cut){
+    FIG6$volctab.kegg[i,"siglegend"] <- "log FC"
+  } else if(FIG6$volctab.kegg[i,"adj.P.Val"] > qval && abs(FIG6$volctab.kegg[i,"logFC"]) < fc.cut){
+    FIG6$volctab.kegg[i,"siglegend"] <- "NS"
+  }
+}
+FIG6$volctab.kegg$siglegend <- factor(FIG6$volctab.kegg$siglegend, levels = c("NS", "log FC", "p-val", "p-val & log FC"))
+
+FIG6$dsp.kegg <- ggplot(FIG6$volctab.kegg, aes(x = logFC, y = -log10(adj.P.Val), text = c(paste0("Feat.: ", Feature)))) + 
+  geom_hline(yintercept = -log10(qval), linetype = "dashed") +
+  geom_vline(xintercept = fc.cut, linetype = "dashed") +
+  geom_vline(xintercept = -fc.cut, linetype = "dashed") +
+  geom_point(aes(fill = siglegend), shape = 21, size = 3, alpha = 0.6) + 
+  scale_fill_manual(values = c("black", "darkgrey", "darkgreen", "darkred"), drop = F) +
+  #ggrepel::geom_text_repel(mapping = aes(label = ifelse(siglegend == "p-val & log FC", Feature, "")), 
+  #                         point.padding = unit(0.5, "lines"), size = 2) +
+  #labs(title = "Volcano plot for DA KEGGs\nLOW vs HIGH methane emissions") +
+  labs(title = "B") +
+  theme_bw() +
+  theme(text = element_text(size = 14), plot.title = element_text(size = 16), axis.title = element_text(size = 12),
+        legend.title = element_blank(), legend.position="top", plot.margin = unit(c(2, 1, 0.5, 0.5), "lines"))
+
+# SAVE PLOTS
+tiff(paste0(PLOTSAV, "Fig6.tiff"), width = 5700, height = 2900, res = 300)
+grid.newpage()
+FIG6$vp1 <- viewport(width = 0.45, height = 1, x = 0.225, y = .5)
+FIG6$subvp <- viewport(width = 0.1, height = 1, x = 0.5, y = 0.45)
+FIG6$vp2 <- viewport(width = 0.45, height = 1, x = 0.775, y = .5)
+print(FIG6$dsp.tax, vp = FIG6$vp1)
+upViewport(0)
+pushViewport(FIG6$subvp)
+grid.draw(FIG6$volctab.leg.tbl)
+upViewport(0)
+print(FIG6$dsp.kegg, vp = FIG6$vp2)
+dev.off()
+
+```
+
+```{r FIG.9}
+FIG9 <- new.env()
+load(file = paste0(RSAV, "44_CH4_KEGG_TAXA.rda"), env = FIG9)
+
+## PLOT PHYLUM KEGG DISTRIBUTION:
+FIG9$rds_mrel_p <- dplyr::select(FIG9$rds_mrel_merged, KEGG, superkingdom, SDIV) %>% group_by(KEGG, superkingdom, SDIV) %>% 
+  tally() %>% group_by(KEGG) %>% arrange(n) %>% mutate(Rsum = sum(n))
+### Add RA:
+FIG9$rds_mrel_heat <- mutate(FIG9$rds_mrel_p, RA = (n/Rsum)*100) %>% dplyr::select(-one_of("n", "Rsum"))
+### Add Unclassified to "classified to kingdom level" SDIV cells:
+FIG9$rds_mrel_heat$SDIV <- ifelse(is.na(FIG9$rds_mrel_heat$SDIV), 
+                             paste("Unclassified",FIG9$rds_mrel_heat$superkingdom, sep = "_"), FIG9$rds_mrel_heat$SDIV)
+### Replace Candidatus_xxx by Candidatus_[superkingdom]:
+FIG9$rds_mrel_heat$SDIV <- ifelse(str_detect(FIG9$rds_mrel_heat$SDIV, "Candidatus"), 
+                             paste("Candidatus",FIG9$rds_mrel_heat$superkingdom, sep = "_"), FIG9$rds_mrel_heat$SDIV)
+### Group columns (sometimes Candidatus_sk appear duplicated):
+FIG9$rds_mrel_heat <- FIG9$rds_mrel_heat %>% group_by(KEGG, superkingdom, SDIV) %>% summarise_at("RA", sum)
+### Add 0-RA rows for each KEGG:
+FIG9$rds_mrel_heat <- ungroup(FIG9$rds_mrel_heat, superkingdom) %>% dplyr::select(-superkingdom) %>% 
+  complete(KEGG, SDIV = unique(FIG9$rds_mrel_heat$SDIV), fill = list(RA = NA))
+### Re-add superkingdom column and fill Unclassified and Candidatus NAs with respective auperkingdom string:
+FIG9$rds_mrel_heat <- left_join(FIG9$rds_mrel_heat, distinct(FIG9$rds_mrel_p[,c("superkingdom", "SDIV")]), by = "SDIV")
+FIG9$rds_mrel_heat$superkingdom <- ifelse(str_detect(FIG9$rds_mrel_heat$SDIV, "Unclassified|Candidatus"), 
+                                     sub(".*_", "", FIG9$rds_mrel_heat$SDIV), FIG9$rds_mrel_heat$superkingdom)
+
+### Reorder data frame by superkingdom and SDIV (decreasing as heatmap represents it down to up):
+FIG9$rds_mrel_heat <- FIG9$rds_mrel_heat[order(FIG9$rds_mrel_heat$superkingdom, FIG9$rds_mrel_heat$SDIV, decreasing = T),]
+FIG9$rds_mrel_heat$SDIV <- factor(FIG9$rds_mrel_heat$SDIV, levels = unique(FIG9$rds_mrel_heat$SDIV))
+
+### Build order for levels of factor with KEGGs sorted by RA hclust:
+FIG9$rds_mrel_heat2 <- dplyr::select(FIG9$rds_mrel_heat, KEGG, SDIV, RA) %>% 
+  pivot_wider(names_from = SDIV, values_from = RA) %>%
+  column_to_rownames("KEGG")
+FIG9$rds_mrel_heat2[is.na(FIG9$rds_mrel_heat2)] <- 0
+FIG9$kegghclust <- hclust(dist(FIG9$rds_mrel_heat2))
+FIG9$sortedkegg <- FIG9$rds_mrel_heat[FIG9$kegghclust$order, "KEGG", drop = T]
+
+### Add rows with total RA per KEGG:
+FIG9$rds_mrel_tot <- FIG9$rds_mrel_p %>% dplyr::select(KEGG, Rsum) %>% distinct() 
+TTsum = sum(FIG9$rds_mrel_tot$Rsum)
+FIG9$rds_mrel_tot <- FIG9$rds_mrel_tot %>% mutate(RA = (Rsum/TTsum)*10000000)
+FIG9$rds_mrel_tot$superkingdom <- "Total"
+FIG9$rds_mrel_tot$SDIV <- "Total"
+FIG9$rds_mrel_tot <- FIG9$rds_mrel_tot[,c("KEGG", "SDIV", "RA", "superkingdom")]
+
+FIG9$rds_mrel_heat <- rbind(FIG9$rds_mrel_heat, FIG9$rds_mrel_tot)
+
+### Again, reorder data frame by superkingdom and SDIV (Total level has been added):
+FIG9$rds_mrel_heat <- FIG9$rds_mrel_heat[order(FIG9$rds_mrel_heat$superkingdom, FIG9$rds_mrel_heat$SDIV, decreasing = T),]
+FIG9$rds_mrel_heat$SDIV <- factor(FIG9$rds_mrel_heat$SDIV, levels = unique(FIG9$rds_mrel_heat$SDIV))
+
+### Transform KEGGs into factor sorted by RA hclust:
+FIG9$rds_mrel_heat$KEGG <- factor(FIG9$rds_mrel_heat$KEGG, levels = FIG9$sortedkegg)
+
+### Create gradients:
+FIG9$gradientends <- c(range(FIG9$rds_mrel_heat[FIG9$rds_mrel_heat$RA <= 100, "RA"], na.rm = T),
+                       range(FIG9$rds_mrel_heat[FIG9$rds_mrel_heat$RA > 100, "RA"], na.rm = T))
+FIG9$colorends <- c("lightblue", "royalblue4", "pink", "red")
+
+### Phyla colors:
+FIG9$rds_mrel_heat$phycols <- ifelse(FIG9$rds_mrel_heat$superkingdom == "Eukaryota", "#008000", 
+                                     ifelse(FIG9$rds_mrel_heat$superkingdom == "Archaea", "#0000FF", 
+                                            ifelse(FIG9$rds_mrel_heat$superkingdom == "Bacteria", "#FF00FF", "#000000")))
+FIG9$phycols <- FIG9$rds_mrel_heat[match(unique(FIG9$rds_mrel_heat$SDIV), FIG9$rds_mrel_heat$SDIV),"phycols", drop = T]
+
+### Plot it:
+FIG9$keggtax <- ggplot(data = FIG9$rds_mrel_heat, mapping = aes(x = KEGG, y = SDIV, fill = RA)) + 
+  geom_tile(colour = "white") + 
+  ylab(label = "Phylum") +
+  #scale_fill_gradient(name = "RA", low = "lightblue", high="royalblue4", na.value = "lightyellow2") +
+  scale_fill_gradientn(colours = FIG9$colorends, values = scales::rescale(FIG9$gradientends), na.value = "lightyellow2") +
+  theme(axis.text.x = element_text(size = 9, angle = 90, hjust = 1, vjust=0.5), axis.title.x = element_text(size = 12),
+        axis.text.y = element_text(size = 9, colour = FIG9$phycols), axis.title.y = element_text(size = 12),
+        legend.position = "none")
+        #legend.position = "right", legend.key.size = unit(1.5, 'cm'),
+        #legend.title = element_text(size = 16), legend.text = element_text(size = 12))
+
+### Create legends
+windows(height = 4, width = 1.5, bg = "white")
+par(mar = c(0.5,0.5,2,0))
+colfunc <- colorRampPalette(c("royalblue4", "lightblue"))
+legend_image <- as.raster(matrix(colfunc(20), ncol=1))
+plot(c(0,2),c(0,1),type = 'n', axes = F, xlab = '', ylab = '', main = 'RA')
+text(x=1.5, y = seq(0,1,l=5), labels = c(NA, seq(25,100,l=4)), adj = 0)
+rasterImage(legend_image,0,0,1,1)
+FIG9$leg1 <- recordPlot()
+dev.off()
+
+windows(height = 4, width = 1.5, bg = "white")
+par(mar = c(0.5,0.5,2,0))
+colfunc <- colorRampPalette(c("red", "pink"))
+legend_image <- as.raster(matrix(colfunc(20), ncol=1))
+plot(c(0,2),c(0,1),type = 'n', axes = F, xlab = '', ylab = '', main = 'Total RA')
+text(x=1.5, y = seq(0,1,l=5), labels = c(NA, seq(25,100,l=4)), adj = 0)
+rasterImage(legend_image,0,0,1,1)
+FIG9$leg2 <- recordPlot()
+dev.off()
+
+# SAVE PLOT
+tiff(paste0(PLOTSAV, "Fig9.tiff"), width = 18, height = 10, units = "in", res = 300)
+grid.newpage()
+vp1 <- viewport(width = 0.8, height = 0.9, x = .40, y = .5)
+legvp1 <- viewport(width = 0.07, height = 0.3, x = 0.85, y = 0.7)
+legvp2 <- viewport(width = 0.07, height = 0.3, x = 0.85, y = 0.3)
+print(FIG9$keggtax, vp = vp1)
+upViewport(0)
+pushViewport(legvp1)
+gridGraphics::grid.echo(FIG9$leg1, newpage = F)
+upViewport(0)
+pushViewport(legvp2)
+gridGraphics::grid.echo(FIG9$leg2, newpage = F)
+dev.off()
+
+```
+
+```{r FIG.10}
+FIG10 <- new.env()
+load(file = paste0(RSAV, "43_DA_KEGG_TAXA.rda"), env = FIG10)
+
+## PLOT PHYLUM KEGG DISTRIBUTION:
+FIG10$rds_mrel_p <- dplyr::select(FIG10$rds_mrel_merged, KEGG, superkingdom, SDIV) %>% group_by(KEGG, superkingdom, SDIV) %>% 
+  tally() %>% group_by(KEGG) %>% arrange(n) %>% mutate(Rsum = sum(n))
+### Add RA:
+FIG10$rds_mrel_heat <- mutate(FIG10$rds_mrel_p, RA = (n/Rsum)*100) %>% dplyr::select(-one_of("n", "Rsum"))
+### Add Unclassified to "classified to kingdom level" SDIV cells:
+FIG10$rds_mrel_heat$SDIV <- ifelse(is.na(FIG10$rds_mrel_heat$SDIV), 
+                             paste("Unclassified",FIG10$rds_mrel_heat$superkingdom, sep = "_"), FIG10$rds_mrel_heat$SDIV)
+### Replace Candidatus_xxx by Candidatus_[superkingdom]:
+FIG10$rds_mrel_heat$SDIV <- ifelse(str_detect(FIG10$rds_mrel_heat$SDIV, "Candidatus"), 
+                             paste("Candidatus",FIG10$rds_mrel_heat$superkingdom, sep = "_"), FIG10$rds_mrel_heat$SDIV)
+### Add 0-RA rows for each KEGG:
+FIG10$rds_mrel_heat <- dplyr::select(FIG10$rds_mrel_heat, -superkingdom) %>% 
+  complete(KEGG, SDIV = unique(FIG10$rds_mrel_heat$SDIV), fill = list(RA = NA))
+### Re-add superkingdom column and fill Unclassified and Candidatus NAs with respective auperkingdom string:
+FIG10$rds_mrel_heat <- left_join(FIG10$rds_mrel_heat, distinct(FIG10$rds_mrel_p[,c("superkingdom", "SDIV")]), by = "SDIV")
+FIG10$rds_mrel_heat$superkingdom <- ifelse(str_detect(FIG10$rds_mrel_heat$SDIV, "Unclassified|Candidatus"), 
+                                     sub(".*_", "", FIG10$rds_mrel_heat$SDIV), FIG10$rds_mrel_heat$superkingdom)
+### Reorder data frame by superkingdom and SDIV (decreasing as heatmap represents it down to up):
+FIG10$rds_mrel_heat <- FIG10$rds_mrel_heat[order(FIG10$rds_mrel_heat$superkingdom, FIG10$rds_mrel_heat$SDIV, decreasing = T),]
+FIG10$rds_mrel_heat$SDIV <- factor(FIG10$rds_mrel_heat$SDIV, levels = unique(FIG10$rds_mrel_heat$SDIV))
+### Add association column, sort KEGGs by association and re-scale RA values to make 2 different color gradients:
+FIG10$HIGHkegg <- unique(FIG10$rds_mrel_merged[FIG10$rds_mrel_merged$Assoc=="HIGH", "KEGG"])
+FIG10$rds_mrel_heat$Assoc <- "LOW"
+FIG10$rds_mrel_heat[FIG10$rds_mrel_heat$KEGG %in% FIG10$HIGHkegg,"Assoc"] <- "HIGH"
+FIG10$rds_mrel_heat <- FIG10$rds_mrel_heat[order(FIG10$rds_mrel_heat$Assoc, FIG10$rds_mrel_heat$KEGG),]
+FIG10$rds_mrel_heat$KEGG <- factor(FIG10$rds_mrel_heat$KEGG, levels = unique(FIG10$rds_mrel_heat$KEGG))
+FIG10$rds_mrel_heat$Assoc <- as.factor(FIG10$rds_mrel_heat$Assoc)
+FIG10$rds_mrel_heat$RA_offset <- ifelse(FIG10$rds_mrel_heat$Assoc == "HIGH", FIG10$rds_mrel_heat$RA * 100000,
+                                       FIG10$rds_mrel_heat$RA)
+### Create gradients:
+FIG10$gradientends <- c(range(FIG10$rds_mrel_heat[FIG10$rds_mrel_heat$Assoc == "LOW","RA_offset"], na.rm = T),
+                  range(FIG10$rds_mrel_heat[FIG10$rds_mrel_heat$Assoc == "HIGH","RA_offset"], na.rm = T))
+FIG10$colorends <- c("lightskyblue", "darkblue", "pink", "red")
+
+### Phyla colors:
+FIG10$rds_mrel_heat$phycols <- ifelse(FIG10$rds_mrel_heat$superkingdom == "Eukaryota", "#008000", 
+                                     ifelse(FIG10$rds_mrel_heat$superkingdom == "Archaea", "#0000FF", "#FF00FF"))
+FIG10$phycols <- FIG10$rds_mrel_heat[match(unique(FIG10$rds_mrel_heat$SDIV), FIG10$rds_mrel_heat$SDIV),"phycols", drop = T]
+
+### Plot it (& add legends)
+FIG10$keggtax <- ggplot(data = FIG10$rds_mrel_heat, mapping = aes(x = KEGG, y = SDIV, fill = RA_offset)) + 
+  geom_tile(colour = "white") + 
+  ylab(label = "Phylum") +
+  #scale_fill_gradient(name = "Relative Abundance", low = "lightcoral", high = "red", na.value = "bisque") +
+  scale_fill_gradientn(colours = FIG10$colorends, values = scales::rescale(FIG10$gradientends), na.value = "lightyellow2") +
+  theme(axis.text.x = element_text(size = 6, angle = 90, hjust = 1, vjust=0.5),
+        axis.text.y = element_text(size = 8, colour = FIG10$phycols),
+        legend.position = "none")
+
+### Create legends
+windows(height = 2, width = 3.5, bg = "white")
+par(mar = rep(0,4))
+plot(0, type = 'n', axes = F, ann = F)
+legend("topleft", legend = c("Archaea", "Bacteria", "Eukaryota"), fill = c("#0000FF", "#FF00FF", "#008000"), bty = "n", 
+       y.intersp = 1.6, cex = 1.2)
+legend("topright", legend = c("HIGH-OA", "LOW-OA"), fill = c("red", "darkblue"), bty = "n", y.intersp = 1.6, cex = 1.2)
+FIG10$leg1 <- recordPlot()
+dev.off()
+
+# SAVE PLOT
+tiff(paste0(PLOTSAV, "Fig10.tiff"), width = 6600, height = 3100, res = 300)
+grid.newpage()
+vp1 <- viewport(width = 1, height = 0.9, x = .5, y = .55)
+legvp1 <- viewport(width = 0.15, height = 0.1, x = 0.14, y = 0.04)
+print(FIG10$keggtax, vp = vp1)
+upViewport(0)
+pushViewport(legvp1)
+gridGraphics::grid.echo(FIG10$leg1, newpage = F)
+dev.off()
+
+```
+
+
+# SUPPL TABLES:
+
+```{r SUPTBL.1}
+STB1 <- new.env()
+load(file = paste0(RSAV, "41_LIMMA_TAXA.rda"), env = STB1)
+load(file = paste0(RSAV, "42_LIMMA_KEGG.rda"), env = STB1)
+# Necesitamos poner STB1$ en todo...
+## DA KEGG divided by classes (we can use this to know how many HIGH-OA/LOW-OA KEGGs participate in metabolism)
+fun_sep_DA <- fun_sep[fun_sep$KEGG_ID %in% unique(c(rownames(toptbl_k$LOWvsHIGH[toptbl_k$LOWvsHIGH$logFC > 0,]),
+                                                    rownames(toptbl_k$LOWvsH_MID[toptbl_k$LOWvsH_MID$logFC > 0,]))),]
+goodclass_DA <- unique(fun_sep_DA[fun_sep_DA$Rank1 %in% "Metabolism", "Rank3"])
+unique(fun_sep_DA[fun_sep_DA$Rank3 %in% goodclass_DA,"KEGG_ID"])
+View(fun_sep_DA[fun_sep_DA$Rank3 %in% goodclass_DA,])
+
+## SAVE TOPTABLES:
+require(openxlsx)
+DA_wb <- createWorkbook()
+
+# Genera: Merge with average counts per group and taxonomy:
+gen.rds <- otu_table(physeq)@.Data
+gen.rds.id <- merge(sample_data(physeq)[,"CH4_Rank", drop = F], t(gen.rds), by = "row.names")
+gen.rds <- dplyr::select(gen.rds.id, -Row.names) %>% group_by_("CH4_Rank") %>% summarise_all(mean) %>%
+  column_to_rownames("CH4_Rank") %>% t() %>% round(2)
+gen.rds <- merge(gen.rds, tax_table(physeq)@.Data, by = 0) %>% dplyr::select(-Row.names) %>% 
+  column_to_rownames("genus")
+factlvls <- levels(gen.rds.id$CH4_Rank)
+
+sigend <- NULL
+for(i in seq(toptbl)){
+  if(nrow(toptbl[[i]]) != 0){
+    sigout <- rownames_to_column(toptbl[[i]], "Genus") %>% dplyr::select(Genus, logFC, t, adj.P.Val)
+    sigout <- cbind("Contrast.AvsB" = names(toptbl)[i], sigout)
+    sigout <- merge(sigout, gen.rds, by.x = "Genus", by.y = "row.names") %>% 
+      dplyr::select(-one_of(factlvls[!factlvls %in% unlist(strsplit(as.character(unique(sigout$Contrast)), "vs"))]))
+    names(sigout)[6:7] <- c("Grp.A", "Grp.B")
+    sigend <- rbind(sigend, sigout)
+    rm(sigout)
+  }
+}
+addWorksheet(wb = DA_wb, sheetName = "DA GENERA")
+writeDataTable(wb = DA_wb, sheet = "DA GENERA", x = sigend, tableStyle = "none", rowNames = F)
+
+# KEGGs: Merge with average kegg counts per group:
+kgg.rds <- t(GBMdataset_k)
+kgg.rds.id <- merge(ids[,"CH4_Rank", drop = F], kgg.rds, by = 0)
+kgg.rds <- dplyr::select(kgg.rds.id, -Row.names) %>% group_by_("CH4_Rank") %>% summarise_all(mean) %>%
+  column_to_rownames("CH4_Rank") %>% t() %>% round(2)
+kgg.rds <- merge(kgg.rds, data.kg_class[,c("Association", "Function", "Class")], by = 0) %>%
+  column_to_rownames("Row.names")
+factlvls <- levels(kgg.rds.id$CH4_Rank)
+
+sigend_k <- NULL
+for(i in seq(toptbl_k)){
+  if(nrow(toptbl_k[[i]]) != 0){
+    sigout <- rownames_to_column(toptbl_k[[i]], "KEGG") %>% dplyr::select(KEGG, logFC, t, adj.P.Val)
+    sigout <- cbind("Contrast.AvsB" = names(toptbl_k)[i], sigout)
+    sigout <- merge(sigout, kgg.rds, by.x = "KEGG", by.y = "row.names") %>% 
+      dplyr::select(-one_of(factlvls[!factlvls %in% unlist(strsplit(as.character(unique(sigout$Contrast)), "vs"))]))
+    names(sigout)[6:7] <- c("Grp.A", "Grp.B")
+    sigend_k <- rbind(sigend_k, sigout)
+    rm(sigout)
+  }
+}
+addWorksheet(wb = DA_wb, sheetName = "DA KEGGs")
+writeDataTable(wb = DA_wb, sheet = "DA KEGGs", x = sigend_k, tableStyle = "none", rowNames = F)
+
+saveWorkbook(DA_wb, file = paste0(WD, "Rsaves/DA_Limma_paper.xlsx"), overwrite = TRUE)
+
+```
